@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f4d2b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Solitario</title>
+<style>
+/* ============================================================
+   AJUSTES VISUALES — todo el tamaño del texto de las cartas
+   depende de --cw (ancho de carta), que se calcula en JS.
+   ============================================================ */
+:root{
+  --cw:100px; --ch:140px; --gap:12px;
+  --fan-up:32px; --fan-down:14px;
+  --felt-a:#2f7d4f; --felt-b:#0d4526;
+  --ink:#111;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;overscroll-behavior:none;}
+body{
+  font-family:"Times New Roman", Times, Georgia, serif;
+  background:radial-gradient(ellipse at 50% 15%, var(--felt-a) 0%, #1a5c35 45%, var(--felt-b) 100%) fixed;
+  color:#fff;
+  touch-action:manipulation;            /* evita el zoom por doble toque */
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  overflow-x:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.10;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.5) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.35) 0 1px, transparent 1px 3px);
+}
+
+/* ---------- Barra de control: botones grandes ---------- */
+.bar{
+  position:sticky;top:0;z-index:30;
+  background:linear-gradient(#f3f1e8,#d2cfc2);
+  border-bottom:3px solid #5f5c52;
+  box-shadow:0 3px 10px rgba(0,0,0,.5);
+  padding:.5rem .75rem;
+  display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;
+}
+.btn{
+  font-family:inherit;font-size:1.35rem;font-weight:700;
+  min-height:3.4rem;padding:0 1.1rem;
+  background:linear-gradient(#ffffff,#dedbcd);
+  border:3px outset #fbfaf4;border-radius:8px;
+  color:var(--ink);cursor:pointer;
+  display:inline-flex;align-items:center;gap:.45rem;
+}
+.btn:active:not(:disabled){border-style:inset;transform:translateY(2px);}
+.btn:disabled{opacity:.4;}
+.btn:focus-visible{outline:4px solid #14487f;outline-offset:3px;}
+.btn.wide{flex:1;justify-content:center;}
+.progress{
+  margin-left:auto;font-size:1.35rem;font-weight:700;color:var(--ink);
+  background:#fffef6;border:3px inset #cfccbe;border-radius:8px;
+  padding:.35rem .8rem;font-variant-numeric:tabular-nums;
+}
+.mini{font-size:1.1rem;color:#2c2a24;font-variant-numeric:tabular-nums;}
+
+/* ---------- Tablero ---------- */
+#board{width:100%;margin:0 auto;padding:.75rem;}
+.row{display:grid;grid-template-columns:repeat(7,var(--cw));gap:var(--gap);justify-content:center;}
+.slot{
+  position:relative;width:var(--cw);height:var(--ch);border-radius:10px;
+  border:3px solid rgba(255,255,255,.34);box-shadow:inset 0 0 26px rgba(0,0,0,.35);
+}
+.slot.ghost::after{
+  content:attr(data-ghost);position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:calc(var(--cw)*.5);color:rgba(255,255,255,.26);
+}
+.slot.blank{border-color:transparent;box-shadow:none;}
+.col{position:relative;width:var(--cw);}
+.col .base{
+  position:absolute;top:0;left:0;width:var(--cw);height:var(--ch);
+  border-radius:10px;border:3px solid rgba(255,255,255,.24);
+  box-shadow:inset 0 0 26px rgba(0,0,0,.3);
+}
+
+/* ---------- Cartas ---------- */
+.card{
+  position:absolute;left:0;width:var(--cw);height:var(--ch);
+  font-size:var(--cw);
+  border-radius:9px;box-shadow:0 3px 6px rgba(0,0,0,.55);
+  touch-action:none;
+}
+.card.face{background:#fffdf4;border:2px solid #2b2a25;}
+.card.back{
+  background:
+    repeating-linear-gradient(45deg,#16337a 0 5px,#3457bb 5px 10px),
+    repeating-linear-gradient(-45deg,rgba(255,255,255,.16) 0 5px,transparent 5px 10px),#16337a;
+  border:2px solid #0b1f4d;
+  box-shadow:inset 0 0 0 4px #fdfcf7, inset 0 0 0 6px #16337a, 0 3px 6px rgba(0,0,0,.55);
+}
+.card.back::after{
+  content:"";position:absolute;inset:24% 27%;
+  border:3px solid rgba(255,255,255,.8);transform:rotate(45deg);
+}
+/* Dos colores (clásico) */
+.card.s0,.card.s3{color:#000;}
+.card.s1,.card.s2{color:#c00000;}
+/* Cuatro colores (más fácil de distinguir) */
+body.fourcolor .card.s0{color:#000000;}
+body.fourcolor .card.s1{color:#c8102e;}
+body.fourcolor .card.s2{color:#0b57b0;}
+body.fourcolor .card.s3{color:#0a7a3c;}
+
+/* Índice de esquina: el de arriba a la izquierda es el grande,
+   porque es lo único que se ve de las cartas tapadas. */
+.idx{position:absolute;display:flex;flex-direction:column;align-items:center;line-height:.92;font-weight:700;}
+.idx.tl{top:.03em;left:.045em;}
+.idx.tl b{font-size:.34em;letter-spacing:-.02em;}
+.idx.tl b.ten{font-size:.28em;}
+.idx.tl i{font-size:.30em;font-style:normal;margin-top:-.04em;}
+.idx.br{bottom:.03em;right:.045em;transform:rotate(180deg);}
+.idx.br b{font-size:.21em;}
+.idx.br b.ten{font-size:.18em;}
+.idx.br i{font-size:.19em;font-style:normal;}
+
+.pips{position:absolute;inset:.13em .30em .10em .30em;
+  display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(7,1fr);place-items:center;}
+.pip{font-size:.185em;line-height:1;}
+.pip.inv{transform:rotate(180deg);}
+.pips.ace .pip{font-size:.5em;}
+.court{
+  position:absolute;inset:.14em .30em .11em .30em;
+  border:2px solid currentColor;border-radius:5px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 4px,transparent 4px 9px);
+}
+.court-l{font-size:.42em;font-weight:700;line-height:.95;}
+.court-s{font-size:.3em;line-height:1;}
+
+/* Estados */
+.card.selected{box-shadow:0 0 0 5px #ffd447, 0 8px 16px rgba(0,0,0,.6);transform:translateY(-6px);}
+.card.hint{animation:pulse 1s ease-in-out 3;}
+@keyframes pulse{50%{box-shadow:0 0 0 6px #7cf3a0, 0 8px 16px rgba(0,0,0,.6);}}
+.target{outline:5px dashed #ffe680;outline-offset:-3px;border-radius:10px;
+  box-shadow:0 0 22px rgba(255,230,128,.55) inset;}
+#dragLayer{position:fixed;left:0;top:0;width:var(--cw);z-index:60;pointer-events:none;display:none;}
+#dragLayer .card{box-shadow:0 14px 24px rgba(0,0,0,.65);}
+
+/* ---------- Paneles ---------- */
+.overlay{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.55);padding:1rem;}
+.overlay.show{display:flex;}
+.panel{
+  background:linear-gradient(#f8f6ee,#e2dfd2);color:var(--ink);
+  border:4px outset #fdfcf7;border-radius:12px;
+  box-shadow:0 18px 50px rgba(0,0,0,.65);
+  padding:1.5rem;width:min(34rem,100%);max-height:92vh;overflow:auto;
+}
+.panel h2{font-size:2rem;margin:0 0 .5rem;}
+.panel p,.panel li{font-size:1.35rem;line-height:1.5;}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:.7rem 0;border-bottom:2px dotted #a9a598;font-size:1.3rem;flex-wrap:wrap;}
+.seg{display:flex;border:3px solid #6f6c61;border-radius:8px;overflow:hidden;}
+.seg button{
+  font-family:inherit;font-size:1.2rem;font-weight:700;padding:.55rem 1rem;min-height:3rem;
+  background:#fffdf4;border:0;border-left:2px solid #b3b0a3;color:var(--ink);cursor:pointer;}
+.seg button:first-child{border-left:0;}
+.seg button.on{background:#0f4d2b;color:#fff;}
+.stat{display:flex;justify-content:space-between;font-size:1.35rem;padding:.3rem 0;border-bottom:1px dotted #a9a598;}
+#fx{position:fixed;inset:0;z-index:70;pointer-events:none;display:none;}
+.hide{display:none !important;}
+.sr-only{
+  position:absolute !important;
+  width:1px;height:1px;
+  padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);
+  white-space:nowrap;border:0;
+}
+@media (prefers-reduced-motion: reduce){.card.hint{animation:none;}}
+</style>
+</head>
+<body>
+
+<!-- ================= BARRA DE CONTROL ================= -->
+<header class="bar">
+  <button id="btnNew"  class="btn">🂠 Nueva partida</button>
+  <button id="btnUndo" class="btn" disabled>↶ Deshacer</button>
+  <button id="btnHint" class="btn">💡 Pista</button>
+  <button id="btnAuto" class="btn hide">✓ Terminar sola</button>
+  <button id="btnCfg"  class="btn">⚙ Ajustes</button>
+  <div class="progress">Colocadas <span id="prog">0</span> de 52</div>
+  <div id="statsBox" class="mini hide">Puntos <b id="hudScore">0</b> · Jugadas <b id="hudMoves">0</b> · Tiempo <b id="hudTime">0:00</b></div>
+</header>
+
+<!-- ================= TABLERO ================= -->
+<main id="board" role="region" aria-label="Tablero de solitario" aria-describedby="helpText boardStatus">
+  <div class="row" id="topRow">
+    <div class="slot ghost" id="stock" data-drop="stock" data-ghost="↻"></div>
+    <div class="slot blank" id="waste" data-drop="waste"></div>
+    <div></div>
+    <div class="slot ghost" data-drop="f0" data-ghost="♠"></div>
+    <div class="slot ghost" data-drop="f1" data-ghost="♥"></div>
+    <div class="slot ghost" data-drop="f2" data-ghost="♦"></div>
+    <div class="slot ghost" data-drop="f3" data-ghost="♣"></div>
+  </div>
+  <div class="row" id="tableau" style="margin-top:var(--gap)"></div>
+</main>
+
+<p id="helpText" class="sr-only">Usa Tab o las flechas para moverte por el tablero. Pulsa Espacio o Intro para robar, elegir una carta o dejarla en un destino.</p>
+<div id="boardStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<div id="dragLayer"></div>
+<canvas id="fx"></canvas>
+
+<!-- ================= AJUSTES ================= -->
+<div class="overlay" id="cfgBox">
+  <div class="panel">
+    <h2>Ajustes</h2>
+    <div class="opt"><span>Tamaño de las cartas</span>
+      <div class="seg" data-opt="size">
+        <button data-val="fit">Normal</button><button data-val="big">Grande</button><button data-val="huge">Enorme</button>
+      </div></div>
+    <div class="opt"><span>Colores de los palos</span>
+      <div class="seg" data-opt="colors">
+        <button data-val="2">Dos</button><button data-val="4">Cuatro</button>
+      </div></div>
+    <div class="opt"><span>Señalar dónde se puede poner</span>
+      <div class="seg" data-opt="targets">
+        <button data-val="on">Sí</button><button data-val="off">No</button>
+      </div></div>
+    <div class="opt"><span>Subir los ases sola</span>
+      <div class="seg" data-opt="aces">
+        <button data-val="on">Sí</button><button data-val="off">No</button>
+      </div></div>
+    <div class="opt"><span>Mostrar puntos y tiempo</span>
+      <div class="seg" data-opt="stats">
+        <button data-val="on">Sí</button><button data-val="off">No</button>
+      </div></div>
+    <div style="display:flex;gap:.6rem;margin-top:1.2rem;flex-wrap:wrap">
+      <button id="btnHelp" class="btn wide">Cómo se juega</button>
+      <button id="btnFull" class="btn wide">Pantalla completa</button>
+      <button id="btnCfgClose" class="btn wide">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= AYUDA ================= -->
+<div class="overlay" id="helpBox">
+  <div class="panel">
+    <h2>Cómo se juega</h2>
+    <p>Toca una carta para elegirla. Se pone amarilla.</p>
+    <p>Toca después el sitio donde quieres dejarla.</p>
+    <p>Toca dos veces seguidas una carta para subirla arriba del todo.</p>
+    <p>El montón azul de la izquierda da cartas nuevas cada vez que lo tocas.</p>
+    <p>Arriba a la derecha se ordena cada palo, del As al Rey.</p>
+    <button id="btnHelpClose" class="btn wide" style="margin-top:1rem">Entendido</button>
+  </div>
+</div>
+
+<!-- ================= CONFIRMAR NUEVA PARTIDA ================= -->
+<div class="overlay" id="askBox">
+  <div class="panel" style="text-align:center">
+    <h2>¿Empezar de nuevo?</h2>
+    <p>Se perderá la partida que está sin terminar.</p>
+    <div style="display:flex;gap:.6rem;margin-top:1rem">
+      <button id="btnAskYes" class="btn wide">Sí, repartir</button>
+      <button id="btnAskNo"  class="btn wide">No, seguir</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= VICTORIA ================= -->
+<div class="overlay" id="winBox">
+  <div class="panel" style="text-align:center">
+    <h2>¡Enhorabuena!</h2>
+    <p style="margin-bottom:1rem">Has colocado las 52 cartas.</p>
+    <div id="winStats" class="hide" style="text-align:left">
+      <div class="stat"><span>Puntos</span><b id="winScore">0</b></div>
+      <div class="stat"><span>Jugadas</span><b id="winMoves">0</b></div>
+      <div class="stat"><span>Tiempo</span><b id="winTime">0:00</b></div>
+    </div>
+    <div style="display:flex;gap:.6rem;margin-top:1.2rem">
+      <button id="btnWinNew"   class="btn wide">Jugar otra vez</button>
+      <button id="btnWinClose" class="btn wide">Ver el tablero</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================
+   0. CONFIGURACIÓN — valores por defecto al abrir el juego por primera vez.
+      Cámbialos aquí si quieres dejarlos fijos en la tableta.
+      Se guardan en el navegador cuando se tocan los Ajustes.
+   ========================================================================== */
+const DEFAULTS = {
+  size:'big',      // 'fit' | 'big' | 'huge'  → tamaño de las cartas
+  colors:'4',      // '2' clásico | '4' un color por palo (más fácil de distinguir)
+  targets:'on',    // resaltar los sitios válidos al elegir una carta
+  aces:'on',       // subir ases y doses a las fundaciones automáticamente
+  stats:'off'      // mostrar puntos, jugadas y tiempo
+};
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem('sol_'+k); return v===null?d:v; }catch(e){ return d; } },
+  set(k,v){ try{ localStorage.setItem('sol_'+k,v); }catch(e){} }
+};
+const CONFIG = {};
+Object.keys(DEFAULTS).forEach(k => CONFIG[k] = store.get(k, DEFAULTS[k]));
+
+/* ==========================================================================
+   1. ESTADO DEL JUEGO
+   ========================================================================== */
+const SUITS = [{ch:'♠',red:false},{ch:'♥',red:true},{ch:'♦',red:true},{ch:'♣',red:false}];
+const RANKS = [null,'A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const PIPS = {
+  1:[[2,4]], 2:[[2,1],[2,7]], 3:[[2,1],[2,4],[2,7]],
+  4:[[1,1],[3,1],[1,7],[3,7]], 5:[[1,1],[3,1],[2,4],[1,7],[3,7]],
+  6:[[1,1],[3,1],[1,4],[3,4],[1,7],[3,7]],
+  7:[[1,1],[3,1],[2,2],[1,4],[3,4],[1,7],[3,7]],
+  8:[[1,1],[3,1],[2,2],[1,4],[3,4],[2,6],[1,7],[3,7]],
+  9:[[1,1],[3,1],[1,3],[3,3],[2,4],[1,5],[3,5],[1,7],[3,7]],
+  10:[[1,1],[3,1],[2,2],[1,3],[3,3],[1,5],[3,5],[2,6],[1,7],[3,7]]
+};
+
+let state, history = [], selection = null, lastTap = null;
+let drag = null, dragging = false;
+let timerId = null, timerRunning = false;
+let fxRunning = false, autoRunning = false, autoBusy = false;
+let colBudget = 400;
+let focusKey = 'stock';
+let statusMsg = '';
+let boardFocusWanted = false;
+
+function emptyState(){
+  return {stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],[],[],[]],
+          score:0,moves:0,recycles:0,time:0,won:false};
+}
+function buildDeck(){ const d=[]; let id=0;
+  for(let s=0;s<4;s++) for(let r=1;r<=13;r++) d.push({s,r,up:false,id:id++});
+  return d;
+}
+function suitName(s){ return ['picas','corazones','diamantes','tréboles'][s]; }
+function rankName(r){
+  return ['','As','Dos','Tres','Cuatro','Cinco','Seis','Siete','Ocho','Nueve','Diez','Jota','Reina','Rey'][r];
+}
+function cardName(card){ return rankName(card.r)+' de '+suitName(card.s); }
+function zoneName(id){
+  if(id==='stock') return 'mazo';
+  if(id==='waste') return 'descarte';
+  if(id[0]==='f') return 'fundación '+(['picas','corazones','diamantes','tréboles'][+id[1]]);
+  return 'columna '+(Number(id[1])+1);
+}
+function announce(msg){
+  if(!msg || msg===statusMsg) return;
+  statusMsg = msg;
+  const live = document.getElementById('boardStatus');
+  if(live) live.textContent = msg;
+}
+function shuffle(a){
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+function newGame(){
+  stopTimer(); stopFx();
+  state = emptyState(); history = []; selection = null; lastTap = null; autoRunning = false;
+  const deck = shuffle(buildDeck());
+  for(let c=0;c<7;c++){
+    for(let i=0;i<=c;i++){ const card = deck.pop(); card.up = (i===c); state.tab[c].push(card); }
+  }
+  state.stock = deck;
+  closeAll();
+  layout(); render();
+  announce('Nueva partida lista. El foco está en el mazo.');
+  setTimeout(autoPlaySafe, 400);
+}
+function pile(id){
+  if(id==='stock') return state.stock;
+  if(id==='waste') return state.waste;
+  if(id[0]==='f')  return state.found[+id[1]];
+  return state.tab[+id[1]];
+}
+
+/* ==========================================================================
+   2. LÓGICA DE MOVIMIENTOS (reglas del Klondike)
+   ========================================================================== */
+function canToTab(card, col){
+  const p = state.tab[col];
+  if(!p.length) return card.r === 13;                     // sólo Reyes en hueco vacío
+  const t = p[p.length-1];
+  return t.up && SUITS[t.s].red !== SUITS[card.s].red && card.r === t.r - 1;
+}
+function canToFound(card, f){
+  const p = state.found[f];
+  if(!p.length) return card.r === 1;
+  const t = p[p.length-1];
+  return t.s === card.s && card.r === t.r + 1;
+}
+function canDrop(cards, dest){
+  if(!cards.length) return false;
+  if(dest[0]==='f') return cards.length===1 && canToFound(cards[0], +dest[1]);
+  if(dest[0]==='t') return canToTab(cards[0], +dest[1]);
+  return false;
+}
+function selectable(pileId, idx){
+  const p = pile(pileId);
+  if(pileId==='stock' || !p[idx] || !p[idx].up) return false;
+  if(pileId==='waste' || pileId[0]==='f') return idx === p.length-1;
+  return true;
+}
+function snapshot(){
+  history.push(JSON.stringify({stock:state.stock,waste:state.waste,found:state.found,
+    tab:state.tab,score:state.score,moves:state.moves,recycles:state.recycles}));
+  if(history.length>400) history.shift();
+}
+function undo(){
+  if(!history.length || state.won) return;
+  const s = JSON.parse(history.pop());
+  Object.assign(state, {stock:s.stock,waste:s.waste,found:s.found,tab:s.tab,
+    score:s.score,moves:s.moves,recycles:s.recycles});
+  selection = null; render();
+  announce('Se deshizo la última jugada.');
+}
+function addScore(n){ state.score = Math.max(0, state.score + n); }
+
+function moveCards(from, idx, dest, quiet){
+  snapshot(); startTimer();
+  const moving = pile(from).splice(idx);
+  const dst = pile(dest);
+  moving.forEach(c => { c.up = true; dst.push(c); });
+  focusKey = moving.length===1 ? 'card-'+moving[0].id : dest;
+
+  if(from==='waste' && dest[0]==='t')                        addScore(5);
+  else if(dest[0]==='f' && (from==='waste'||from[0]==='t'))   addScore(10);
+  else if(from[0]==='f' && dest[0]==='t')                     addScore(-15);
+
+  if(from[0]==='t'){                                          // volteo automático
+    const col = state.tab[+from[1]];
+    if(col.length && !col[col.length-1].up){ col[col.length-1].up = true; addScore(5); }
+  }
+  state.moves++; selection = null;
+  render(); checkWin();
+  announce((moving.length===1 ? cardName(moving[0]) : 'Bloque de cartas')+' a '+zoneName(dest)+'.');
+  if(!quiet) setTimeout(autoPlaySafe, 200);
+}
+function draw(){
+  if(state.won) return;
+  startTimer(); snapshot();
+  if(state.stock.length){
+    const c = state.stock.pop(); c.up = true; state.waste.push(c);
+    focusKey = 'card-'+c.id;
+    announce('Se robó '+cardName(c)+'.');
+  }else if(state.waste.length){
+    while(state.waste.length){ const c = state.waste.pop(); c.up = false; state.stock.push(c); }
+    state.recycles++; addScore(-100);
+    focusKey = 'stock';
+    announce('El descarte volvió al mazo.');
+  }else{ history.pop(); return; }
+  state.moves++; selection = null; render();
+  setTimeout(autoPlaySafe, 200);
+}
+function autoToFound(from){
+  const p = pile(from);
+  if(!p.length) return false;
+  const c = p[p.length-1];
+  if(!c.up) return false;
+  for(let f=0;f<4;f++) if(canToFound(c,f)){ flyMove(from, p.length-1, 'f'+f); return true; }
+  return false;
+}
+
+/* Movimiento con animación de vuelo hacia la fundación */
+function flyMove(from, idx, dest, quiet){
+  const card = pile(from)[idx];
+  const el = document.querySelector('.card[data-cid="'+card.id+'"]');
+  const r0 = el ? el.getBoundingClientRect() : null;
+  moveCards(from, idx, dest, quiet);
+  const el2 = document.querySelector('.card[data-cid="'+card.id+'"]');
+  if(!r0 || !el2) return;
+  const r1 = el2.getBoundingClientRect();
+  el2.style.visibility = 'hidden';
+  const clone = el2.cloneNode(true);
+  clone.style.cssText += 'position:fixed;margin:0;left:'+r0.left+'px;top:'+r0.top+'px;width:'+r0.width+
+    'px;height:'+r0.height+'px;z-index:65;visibility:visible;transition:transform .3s cubic-bezier(.3,.85,.4,1);';
+  document.body.appendChild(clone);
+  requestAnimationFrame(()=>{ clone.style.transform='translate('+(r1.left-r0.left)+'px,'+(r1.top-r0.top)+'px)'; });
+  setTimeout(()=>{ clone.remove(); if(el2.isConnected) el2.style.visibility=''; }, 330);
+}
+
+/* Sube ases y doses solos: quita trabajo repetitivo sin quitar decisiones */
+function autoPlaySafe(){
+  if(CONFIG.aces!=='on' || state.won || dragging || autoRunning || autoBusy) return;
+  const sources = ['waste','t0','t1','t2','t3','t4','t5','t6'];
+  for(const s of sources){
+    const p = pile(s);
+    if(!p.length) continue;
+    const c = p[p.length-1];
+    if(!c.up || c.r > 2) continue;
+    for(let f=0;f<4;f++){
+      if(canToFound(c,f)){
+        autoBusy = true;
+        flyMove(s, p.length-1, 'f'+f, true);
+        setTimeout(()=>{ autoBusy = false; autoPlaySafe(); }, 320);
+        return;
+      }
+    }
+  }
+}
+
+/* Terminar la partida sola cuando ya no queda ninguna carta boca abajo */
+function canAutoFinish(){
+  if(state.won) return false;
+  if(state.found.reduce((a,p)=>a+p.length,0) === 52) return false;
+  return state.tab.every(col => col.every(c => c.up));
+}
+function autoFinish(){
+  if(autoRunning) return;
+  autoRunning = true; let guard = 0;
+  const step = ()=>{
+    if(state.won || guard++ > 400){ autoRunning = false; render(); return; }
+    let did = false;
+    for(const s of ['waste','t0','t1','t2','t3','t4','t5','t6']){ if(autoToFound(s)){ did = true; break; } }
+    if(!did && (state.stock.length || state.waste.length)){ draw(); did = true; }
+    if(did) setTimeout(step, 130); else { autoRunning = false; render(); }
+  };
+  step();
+}
+
+/* Pista: busca un movimiento útil y lo señala */
+function findHint(){
+  for(const s of ['waste','t0','t1','t2','t3','t4','t5','t6']){
+    const p = pile(s);
+    if(!p.length) continue;
+    const c = p[p.length-1];
+    if(c.up) for(let f=0;f<4;f++) if(canToFound(c,f)) return {cid:c.id, dest:'f'+f};
+  }
+  for(let c=0;c<7;c++){
+    const col = state.tab[c];
+    const i = col.findIndex(x => x.up);
+    if(i < 0) continue;
+    const card = col[i];
+    for(let d=0;d<7;d++){
+      if(d===c) continue;
+      if(canToTab(card,d) && (i>0 || state.tab[d].length)) return {cid:card.id, dest:'t'+d};
+    }
+  }
+  if(state.waste.length){
+    const c = state.waste[state.waste.length-1];
+    for(let d=0;d<7;d++) if(canToTab(c,d)) return {cid:c.id, dest:'t'+d};
+  }
+  return null;
+}
+function showHint(){
+  const h = findHint();
+  if(!h){
+    const st = document.getElementById('stock');
+    st.classList.add('target');
+    announce('No hay una jugada directa. Prueba robar del mazo.');
+    setTimeout(()=>st.classList.remove('target'), 2200);
+    return;
+  }
+  const card = document.querySelector('.card[data-cid="'+h.cid+'"]');
+  const zone = document.querySelector('[data-drop="'+h.dest+'"]');
+  const p = zoneName(h.dest);
+  if(card) card.classList.add('hint');
+  if(zone) zone.classList.add('target');
+  if(card){
+    const cardObj = [...state.waste, ...state.found.flat(), ...state.tab.flat(), ...state.stock].find(c => c.id===h.cid);
+    if(cardObj) announce('Pista: mueve '+cardName(cardObj)+' a '+p+'.');
+  }
+  setTimeout(()=>{
+    if(card) card.classList.remove('hint');
+    if(zone) zone.classList.remove('target');
+  }, 3000);
+}
+
+/* ==========================================================================
+   3. RENDERIZADO DE INTERFAZ
+   ========================================================================== */
+function cardEl(card, faceUp, pileId, idx){
+  const d = document.createElement('div');
+  d.className = 'card s'+card.s+' ' + (faceUp ? 'face' : 'back');
+  d.dataset.cid = card.id;
+  if(pileId !== undefined){
+    d.dataset.pile = pileId; d.dataset.idx = idx;
+    d.dataset.focusKey = 'card-'+card.id;
+    d.tabIndex = 0;
+    d.setAttribute('role', 'button');
+    d.setAttribute('aria-label', faceUp
+      ? cardName(card)+(selectable(pileId, idx) ? ', disponible para mover' : ', no disponible')
+      : 'Carta boca abajo en el mazo');
+    if(selection && pileId === selection.from && idx >= selection.idx) d.setAttribute('aria-pressed', 'true');
+  }
+  if(faceUp) d.innerHTML = faceHTML(card);
+  if(selection && pileId === selection.from && idx >= selection.idx) d.classList.add('selected');
+  return d;
+}
+function faceHTML(c){
+  const R = RANKS[c.r], S = SUITS[c.s].ch, ten = c.r===10 ? ' class="ten"' : '';
+  let center;
+  if(c.r >= 11){
+    center = '<div class="court"><span class="court-l">'+R+'</span><span class="court-s">'+S+'</span></div>';
+  }else{
+    center = '<div class="pips'+(c.r===1?' ace':'')+'">' + PIPS[c.r].map(([col,row]) =>
+      '<span class="pip'+(row>4?' inv':'')+'" style="grid-column:'+col+';grid-row:'+row+'">'+S+'</span>'
+    ).join('') + '</div>';
+  }
+  return '<span class="idx tl"><b'+ten+'>'+R+'</b><i>'+S+'</i></span>' + center +
+         '<span class="idx br"><b'+ten+'>'+R+'</b><i>'+S+'</i></span>';
+}
+
+function render(){
+  const cs = getComputedStyle(document.documentElement);
+  const CH = parseFloat(cs.getPropertyValue('--ch'));
+  const FU = parseFloat(cs.getPropertyValue('--fan-up'));
+  const FD = parseFloat(cs.getPropertyValue('--fan-down'));
+
+  // talón
+  const stockEl = document.getElementById('stock');
+  stockEl.innerHTML = '';
+  stockEl.classList.toggle('ghost', state.stock.length === 0);
+  setupZone(stockEl, 'stock', state.stock.length ? 'Mazo. '+state.stock.length+' cartas boca abajo. Pulsa para robar.' : 'Mazo vacío. Pulsa para reciclar el descarte si existe.');
+  if(state.stock.length){
+    const el = cardEl(state.stock[state.stock.length-1], false, 'stock', state.stock.length-1);
+    el.style.top = '0px'; stockEl.appendChild(el);
+  }
+
+  // pozo (robo de una en una)
+  const wasteEl = document.getElementById('waste');
+  wasteEl.innerHTML = '';
+  const wasteTop = state.waste[state.waste.length-1];
+  setupZone(wasteEl, 'waste', wasteTop ? 'Descarte. Arriba está '+cardName(wasteTop)+'.' : 'Descarte vacío.');
+  const wStart = Math.max(0, state.waste.length-3);
+  for(let i=wStart;i<state.waste.length;i++){
+    const el = cardEl(state.waste[i], true, 'waste', i);
+    el.style.top = '0px'; el.style.left = ((i-wStart)*4)+'px';
+    wasteEl.appendChild(el);
+  }
+
+  // fundaciones
+  for(let f=0;f<4;f++){
+    const slot = document.querySelector('[data-drop="f'+f+'"]');
+    slot.innerHTML = '';
+    const p = state.found[f];
+    slot.classList.toggle('ghost', p.length===0);
+    setupZone(slot, 'f'+f, p.length ? zoneName('f'+f)+'. Arriba está '+cardName(p[p.length-1])+'.' : zoneName('f'+f)+' vacía.');
+    if(p.length){ const el = cardEl(p[p.length-1], true, 'f'+f, p.length-1); el.style.top='0px'; slot.appendChild(el); }
+  }
+
+  // tablero: cada columna comprime su abanico sólo si le hace falta
+  const tab = document.getElementById('tableau');
+  tab.innerHTML = '';
+  for(let c=0;c<7;c++){
+    const col = document.createElement('div');
+    col.className = 'col'; col.dataset.drop = 't'+c;
+    col.dataset.focusKey = 't'+c;
+    col.tabIndex = 0;
+    col.setAttribute('role', 'group');
+    const base = document.createElement('div'); base.className = 'base'; col.appendChild(base);
+    const cards = state.tab[c];
+    const top = cards[cards.length-1];
+    col.setAttribute('aria-label', cards.length
+      ? zoneName('t'+c)+'. Arriba está '+cardName(top)+(top.up ? '.' : ' boca abajo.')
+      : zoneName('t'+c)+' vacía.');
+    let fu = FU, fd = FD;
+    if(cards.length > 1){
+      const natural = CH + cards.slice(0,-1).reduce((a,k)=>a+(k.up?FU:FD), 0);
+      if(natural > colBudget){
+        const k = Math.max(0.3, (colBudget - CH) / (natural - CH));
+        fu = Math.max(16, FU*k); fd = Math.max(8, FD*k);
+      }
+    }
+    let y = 0, total = CH;
+    cards.forEach((card,i)=>{
+      const el = cardEl(card, card.up, 't'+c, i);
+      el.style.top = Math.round(y)+'px';
+      col.appendChild(el);
+      if(i < cards.length-1){ const step = card.up?fu:fd; y += step; total += step; }
+    });
+    col.style.height = Math.max(colBudget, total) + 'px';
+    tab.appendChild(col);
+  }
+
+  markTargets();
+  updateHud();
+}
+
+/* Resalta los sitios donde se puede dejar la carta elegida */
+function markTargets(){
+  document.querySelectorAll('.target').forEach(e => e.classList.remove('target'));
+  if(CONFIG.targets !== 'on' || !selection) return;
+  const cards = pile(selection.from).slice(selection.idx);
+  ['f0','f1','f2','f3','t0','t1','t2','t3','t4','t5','t6'].forEach(dest=>{
+    if(dest === selection.from) return;
+    if(canDrop(cards, dest)){
+      const zone = document.querySelector('[data-drop="'+dest+'"]');
+      if(zone) zone.classList.add('target');
+    }
+  });
+}
+
+function setupZone(el, key, label){
+  el.dataset.focusKey = key;
+  el.tabIndex = 0;
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-label', label);
+}
+
+function restoreBoardFocus(){
+  if(!boardFocusWanted) return;
+  const next = document.querySelector('[data-focus-key="'+focusKey+'"]') || document.querySelector('#board [data-focus-key]');
+  if(next) next.focus();
+}
+
+function centerOf(el){
+  const r = el.getBoundingClientRect();
+  return {x:r.left + r.width/2, y:r.top + r.height/2};
+}
+
+function moveBoardFocus(current, key){
+  const all = [...document.querySelectorAll('#board [data-focus-key]')].filter(el => !el.closest('.hide'));
+  if(!all.length) return;
+  const here = centerOf(current);
+  const dir = {
+    ArrowLeft: p => p.x < here.x - 4,
+    ArrowRight: p => p.x > here.x + 4,
+    ArrowUp: p => p.y < here.y - 4,
+    ArrowDown: p => p.y > here.y + 4
+  }[key];
+  if(!dir) return;
+  const ranked = all.filter(el => el !== current).map(el => {
+    const p = centerOf(el);
+    const primary = key==='ArrowLeft' || key==='ArrowRight' ? Math.abs(p.x - here.x) : Math.abs(p.y - here.y);
+    const secondary = key==='ArrowLeft' || key==='ArrowRight' ? Math.abs(p.y - here.y) : Math.abs(p.x - here.x);
+    return {el, p, score: primary*10 + secondary};
+  }).filter(item => dir(item.p)).sort((a,b)=>a.score-b.score);
+  if(ranked.length){ ranked[0].el.focus(); focusKey = ranked[0].el.dataset.focusKey; }
+}
+
+function updateHud(){
+  const placed = state.found.reduce((a,p)=>a+p.length,0);
+  document.getElementById('prog').textContent = placed;
+  document.getElementById('hudScore').textContent = state.score;
+  document.getElementById('hudMoves').textContent = state.moves;
+  document.getElementById('hudTime').textContent = fmtTime(state.time);
+  document.getElementById('btnUndo').disabled = !history.length || state.won;
+  document.getElementById('btnAuto').classList.toggle('hide', !canAutoFinish());
+  restoreBoardFocus();
+}
+function fmtTime(s){ return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+
+/* Calcula el tamaño de carta: cabe a lo ancho y, si se puede, también a lo alto */
+function layout(){
+  const board = document.getElementById('board');
+  const pad = 24;
+  const availW = board.clientWidth - pad;
+  const gap = Math.max(6, Math.min(18, Math.round(availW*0.014)));
+  const byWidth = Math.floor((availW - gap*6)/7);
+
+  const barEl = document.querySelector('.bar');
+  const barH = barEl ? barEl.offsetHeight : 72;
+  const availH = window.innerHeight - barH - pad*2;
+  // fila superior + una columna de unas 10 cartas ≈ 3,1 alturas de carta
+  const byHeight = Math.floor((availH - gap) / (3.1 * 1.4));
+
+  const mult = CONFIG.size==='huge' ? 1.5 : CONFIG.size==='big' ? 1.22 : 1;
+  let cw = Math.min(byWidth, Math.max(byHeight, 60) * mult);
+  cw = Math.max(52, Math.min(cw, byWidth));      // nunca más ancho de lo que cabe
+  const ch = Math.round(cw*1.4);
+
+  const s = document.documentElement.style;
+  s.setProperty('--cw', Math.floor(cw)+'px');
+  s.setProperty('--ch', ch+'px');
+  s.setProperty('--gap', gap+'px');
+  s.setProperty('--fan-up', Math.round(ch*0.26)+'px');
+  s.setProperty('--fan-down', Math.round(ch*0.11)+'px');
+
+  colBudget = Math.max(availH - ch - gap*2, ch*2.2);
+}
+
+/* ==========================================================================
+   4. MANEJADORES DE EVENTOS (tocar para mover + arrastrar)
+   ========================================================================== */
+const dragLayer = document.getElementById('dragLayer');
+document.getElementById('board').addEventListener('pointerdown', onPointerDown);
+
+function onPointerDown(e){
+  if(state.won || autoRunning) return;
+  const node = e.target.closest('.card');
+  if(node && node.dataset.pile !== undefined){
+    const from = node.dataset.pile, idx = +node.dataset.idx;
+    if(from === 'stock'){ draw(); return; }
+    if(!selectable(from, idx)){
+      const zone = e.target.closest('[data-drop]');
+      if(zone) tapZone(zone.dataset.drop);
+      return;
+    }
+    const r = node.getBoundingClientRect();
+    drag = {from, idx, sx:e.clientX, sy:e.clientY, ox:e.clientX-r.left, oy:e.clientY-r.top, cid:+node.dataset.cid};
+    dragging = false;
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    e.preventDefault();
+    return;
+  }
+  const zone = e.target.closest('[data-drop]');
+  if(zone) tapZone(zone.dataset.drop);
+}
+function onPointerMove(e){
+  if(!drag) return;
+  if(!dragging){
+    if(Math.hypot(e.clientX-drag.sx, e.clientY-drag.sy) < 12) return;   // umbral amplio: evita arrastres por temblor
+    beginDrag();
+  }
+  dragLayer.style.transform = 'translate('+(e.clientX-drag.ox)+'px,'+(e.clientY-drag.oy)+'px)';
+}
+function beginDrag(){
+  dragging = true;
+  const fu = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fan-up'));
+  dragLayer.innerHTML = '';
+  pile(drag.from).slice(drag.idx).forEach((c,i)=>{
+    const el = cardEl(c, true);
+    el.style.top = (i*fu)+'px';
+    dragLayer.appendChild(el);
+    const orig = document.querySelector('.card[data-cid="'+c.id+'"][data-pile]');
+    if(orig) orig.style.visibility = 'hidden';
+  });
+  dragLayer.style.display = 'block';
+}
+function onPointerUp(e){
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
+  if(!drag) return;
+  const d = drag; drag = null;
+  if(dragging){
+    dragging = false;
+    dragLayer.style.display = 'none'; dragLayer.innerHTML = '';
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const zone = under ? under.closest('[data-drop]') : null;
+    const cards = pile(d.from).slice(d.idx);
+    if(zone && zone.dataset.drop !== d.from && canDrop(cards, zone.dataset.drop)) moveCards(d.from, d.idx, zone.dataset.drop);
+    else render();
+    return;
+  }
+  handleTap(d.from, d.idx, d.cid);
+}
+
+/* Un toque elige la carta; otro toque en el destino la mueve.
+   Dos toques seguidos sobre la misma carta la envían a su fundación. */
+function handleTap(from, idx, cid){
+  const now = Date.now();
+  focusKey = 'card-'+cid;
+  if(lastTap && lastTap.cid === cid && now - lastTap.t < 600){    // ventana ancha de doble toque
+    const topCard = pile(from)[idx];
+    lastTap = null;
+    if(idx === pile(from).length-1 && topCard && autoToFound(from)){ announce(cardName(topCard)+' enviada a una fundación.'); return; }
+    selection = null; render(); return;
+  }
+  lastTap = {cid, t:now};
+
+  if(selection){
+    if(selection.from === from && selection.idx === idx){ selection = null; render(); announce('Selección cancelada.'); return; }
+    if(from[0]==='t' || from[0]==='f'){
+      const cards = pile(selection.from).slice(selection.idx);
+      if(selection.from !== from && canDrop(cards, from)){ moveCards(selection.from, selection.idx, from); return; }
+    }
+  }
+  selection = selectable(from, idx) ? {from, idx} : null;
+  announce(selection ? cardName(pile(from)[idx])+' seleccionada. Elige un destino.' : 'Esa carta no se puede mover ahora.');
+  render();
+}
+function tapZone(dest){
+  focusKey = dest;
+  if(dest === 'stock'){ draw(); return; }
+  if(!selection){ announce(zoneName(dest)+'. No hay carta seleccionada.'); return; }
+  const cards = pile(selection.from).slice(selection.idx);
+  if(canDrop(cards, dest)) moveCards(selection.from, selection.idx, dest);
+  else { selection = null; render(); announce('No se puede dejar la carta en '+zoneName(dest)+'.'); }
+}
+
+/* ---- Botones, paneles y ajustes ---- */
+function openBox(id){ document.getElementById(id).classList.add('show'); }
+function closeAll(){ document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('show')); }
+
+document.getElementById('btnNew').addEventListener('click', ()=>{
+  if(state.moves > 0 && !state.won) openBox('askBox'); else newGame();
+});
+document.getElementById('btnAskYes').addEventListener('click', newGame);
+document.getElementById('btnAskNo').addEventListener('click', closeAll);
+document.getElementById('btnUndo').addEventListener('click', undo);
+document.getElementById('btnHint').addEventListener('click', showHint);
+document.getElementById('btnAuto').addEventListener('click', autoFinish);
+document.getElementById('btnCfg').addEventListener('click', ()=>openBox('cfgBox'));
+document.getElementById('btnCfgClose').addEventListener('click', closeAll);
+document.getElementById('btnHelp').addEventListener('click', ()=>{ closeAll(); openBox('helpBox'); });
+document.getElementById('btnHelpClose').addEventListener('click', closeAll);
+document.getElementById('btnWinNew').addEventListener('click', newGame);
+document.getElementById('btnWinClose').addEventListener('click', ()=>{ closeAll(); stopFx(); });
+document.getElementById('btnFull').addEventListener('click', ()=>{
+  if(!document.fullscreenElement && document.documentElement.requestFullscreen)
+    document.documentElement.requestFullscreen().catch(()=>{});
+  else if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+});
+
+document.querySelectorAll('.seg').forEach(seg=>{
+  seg.addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    const opt = seg.dataset.opt;
+    CONFIG[opt] = b.dataset.val; store.set(opt, b.dataset.val);
+    applyConfig(); layout(); render();
+  });
+});
+function applyConfig(){
+  document.body.classList.toggle('fourcolor', CONFIG.colors === '4');
+  document.getElementById('statsBox').classList.toggle('hide', CONFIG.stats !== 'on');
+  document.getElementById('winStats').classList.toggle('hide', CONFIG.stats !== 'on');
+  document.querySelectorAll('.seg').forEach(seg=>{
+    seg.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.val === CONFIG[seg.dataset.opt]));
+  });
+}
+document.addEventListener('keydown', e=>{
+  if(document.getElementById('board').contains(e.target)){
+    const item = e.target.closest('[data-focus-key]');
+    if(!item) return;
+    boardFocusWanted = true;
+    if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+      e.preventDefault();
+      moveBoardFocus(item, e.key);
+      return;
+    }
+    if(e.key==='Enter' || e.key===' '){
+      e.preventDefault();
+      const card = item.classList.contains('card') ? item : item.querySelector('.card[data-pile]');
+      if(card && card.dataset.pile !== undefined){ handleTap(card.dataset.pile, +card.dataset.idx, +card.dataset.cid); return; }
+      if(item.dataset.drop) tapZone(item.dataset.drop);
+      return;
+    }
+  }
+  if(e.target.tagName === 'BUTTON') return;
+  if(e.key==='u'||e.key==='U') undo();
+  if(e.key==='h'||e.key==='H') showHint();
+  if(e.key===' '){ e.preventDefault(); draw(); }
+});
+document.addEventListener('focusin', e=>{
+  boardFocusWanted = document.getElementById('board').contains(e.target);
+  if(!boardFocusWanted) return;
+  const item = e.target.closest('[data-focus-key]');
+  if(item) focusKey = item.dataset.focusKey;
+});
+window.addEventListener('resize', ()=>{ layout(); render(); });
+window.addEventListener('orientationchange', ()=>setTimeout(()=>{ layout(); render(); }, 250));
+document.addEventListener('contextmenu', e=>{ if(e.target.closest('.card')) e.preventDefault(); });
+
+/* Mantener la pantalla encendida mientras se juega */
+let wakeLock = null;
+async function keepAwake(){
+  try{ if('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+}
+document.addEventListener('pointerdown', function once(){ keepAwake(); document.removeEventListener('pointerdown', once); });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') keepAwake(); });
+
+/* Manifiesto incrustado: permite "Añadir a pantalla de inicio" a pantalla completa */
+(function(){
+  const icon = 'data:image/svg+xml,'+encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'+
+    '<rect width="512" height="512" rx="76" fill="#0f4d2b"/>'+
+    '<rect x="122" y="76" width="268" height="360" rx="30" fill="#fffdf4" stroke="#111" stroke-width="10"/>'+
+    '<text x="256" y="340" font-family="Georgia,serif" font-size="240" text-anchor="middle" fill="#111">&#9824;</text></svg>');
+  const manifest = {name:'Solitario', short_name:'Solitario', start_url:'./solitario-accesible.html', scope:'./',
+    display:'standalone', orientation:'any', background_color:'#0f4d2b', theme_color:'#0f4d2b',
+    icons:[{src:icon, sizes:'any', type:'image/svg+xml', purpose:'any'}]};
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = 'data:application/manifest+json,'+encodeURIComponent(JSON.stringify(manifest));
+  document.head.appendChild(link);
+  const apple = document.createElement('link');
+  apple.rel = 'apple-touch-icon'; apple.href = icon;
+  document.head.appendChild(apple);
+  // Guarda las cartas sin conexión si hay un sw.js al lado (opcional)
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+
+/* ==========================================================================
+   5. TEMPORIZADOR, VICTORIA Y ANIMACIÓN FINAL
+   ========================================================================== */
+function startTimer(){
+  if(timerRunning || state.won) return;
+  timerRunning = true;
+  timerId = setInterval(()=>{
+    state.time++;
+    if(state.time > 30 && state.time % 10 === 0) addScore(-2);
+    updateHud();
+  }, 1000);
+}
+function stopTimer(){ timerRunning = false; if(timerId){ clearInterval(timerId); timerId = null; } }
+
+function checkWin(){
+  if(state.won || state.found.reduce((a,p)=>a+p.length,0) !== 52) return;
+  state.won = true; stopTimer();
+  if(state.time > 30) addScore(Math.floor(700000/state.time));
+  updateHud();
+  announce('Victoria. Has colocado las 52 cartas.');
+  setTimeout(celebrate, 350);
+}
+function stopFx(){
+  fxRunning = false;
+  const cv = document.getElementById('fx');
+  cv.style.display = 'none';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+}
+function celebrate(){
+  const cv = document.getElementById('fx');
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  const W = window.innerWidth, H = window.innerHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  cv.style.width = W+'px'; cv.style.height = H+'px'; cv.style.display = 'block';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  const rects = [0,1,2,3].map(f => document.querySelector('[data-drop="f'+f+'"]').getBoundingClientRect());
+  const queue = [];
+  for(let i=12;i>=0;i--) for(let f=0;f<4;f++){
+    const c = state.found[f][i];
+    if(c) queue.push({card:c, x:rects[f].left, y:rects[f].top, w:rects[f].width, h:rects[f].height});
+  }
+  let parts = [], frame = 0;
+  fxRunning = true;
+  const loop = ()=>{
+    if(!fxRunning) return;
+    frame++;
+    if(frame % 5 === 0 && queue.length){
+      const q = queue.shift();
+      const dir = Math.random()<.5 ? -1 : 1;
+      parts.push(Object.assign(q, {vx: dir*(2.5+Math.random()*6), vy: -(2+Math.random()*5)}));
+    }
+    parts.forEach(p=>{
+      p.vy += 0.45; p.x += p.vx; p.y += p.vy;
+      if(p.y + p.h > H){
+        p.y = H - p.h; p.vy = -p.vy*0.8;
+        if(Math.abs(p.vy) < 2) p.vy = -(4+Math.random()*5);
+      }
+      drawCanvasCard(ctx, p);
+    });
+    parts = parts.filter(p => p.x > -p.w-60 && p.x < W+60);
+    if(parts.length || queue.length) requestAnimationFrame(loop); else fxRunning = false;
+  };
+  loop();
+  setTimeout(showWinPanel, 3200);
+}
+function drawCanvasCard(ctx, p){
+  const {x,y,w,h,card} = p, r = 7;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fillStyle = '#fffdf4'; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = '#2b2a25'; ctx.stroke();
+  const four = CONFIG.colors === '4';
+  ctx.fillStyle = four ? ['#000','#c8102e','#0b57b0','#0a7a3c'][card.s]
+                       : (SUITS[card.s].red ? '#c00000' : '#000000');
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.font = 'bold '+Math.round(w*0.3)+'px Georgia, serif';
+  ctx.fillText(RANKS[card.r], x+w*0.07, y+h*0.04);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = Math.round(w*0.45)+'px Georgia, serif';
+  ctx.fillText(SUITS[card.s].ch, x+w/2, y+h*0.62);
+}
+function showWinPanel(){
+  document.getElementById('winScore').textContent = state.score;
+  document.getElementById('winMoves').textContent = state.moves;
+  document.getElementById('winTime').textContent = fmtTime(state.time);
+  openBox('winBox');
+}
+
+/* ========================== ARRANQUE ========================== */
+applyConfig();
+newGame();
+window.addEventListener('load', ()=>{ layout(); render(); });
+</script>
+</body>
+</html>
